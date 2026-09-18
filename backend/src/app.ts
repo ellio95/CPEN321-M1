@@ -7,6 +7,11 @@ export function createApp(): Express {
     res.json({ status: 'ok' });
   });
 
+  app.post('/login', (_req, res) => {
+    res.json({ status: 'login received' });
+    console.log('login received');
+  });
+
   app.use((_req, res) => {
     res.status(404).json({ error: 'Not Found' });
   });
