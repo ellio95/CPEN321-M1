@@ -63,22 +63,22 @@ fun MainApp(apiBaseUrl: String) {
         Box(modifier = Modifier.fillMaxSize()) {
             when (currentScreen) {
                 "Home" -> HomeScreen(
-                    userEmail = userEmail,
+
                     onNavigateToStatus = { currentScreen = "Status" },
                     onNavigateToProfile = { currentScreen = "Profile" },
                     onNavigateToSettings = { currentScreen = "Settings" },
-                    onLogin = { email ->
-                        userEmail = email
-                    },
-                    setLoggingIn = { isLoggingIn = it },
-                    apiBaseUrl = apiBaseUrl,
                     modifier = Modifier.padding(innerPadding)
                 )
 
                 "Status" -> StatusScreen(
+                    userEmail = userEmail,
                     apiBaseUrl = apiBaseUrl,
                     onBack = { currentScreen = "Home" },
-                    modifier = Modifier.padding(innerPadding)
+                    modifier = Modifier.padding(innerPadding),
+                    onLogin = { email ->
+                        userEmail = email
+                    },
+                    setLoggingIn = { isLoggingIn = it },
                 )
 
                 "Profile" -> DummyScreen(
@@ -108,51 +108,19 @@ fun MainApp(apiBaseUrl: String) {
 
 @Composable
 fun HomeScreen(
-    userEmail: String?,
     onNavigateToStatus: () -> Unit,
     onNavigateToProfile: () -> Unit,
     onNavigateToSettings: () -> Unit,
-    onLogin: (String) -> Unit,
-    setLoggingIn: (Boolean) -> Unit,
-    apiBaseUrl: String,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
 
     Column(
         modifier = modifier.fillMaxSize(),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(text = userEmail?.let { "Welcome, $it" } ?: "Main Menu")
+        Text(text = "Main Menu")
         Spacer(modifier = Modifier.height(24.dp))
-
-        if (userEmail == null) {
-            Button(onClick = {
-                scope.launch {
-                    setLoggingIn(true)
-                    try {
-                        val idToken = signInWithGoogle(context, BuildConfig.GOOGLE_CLIENT_ID)
-                        if (idToken != null) {
-                            val email = loginWithBackend(apiBaseUrl, idToken)
-                            if (email != null) {
-                                onLogin(email)
-                            } else {
-                                Toast.makeText(context, "Backend login failed", Toast.LENGTH_LONG).show()
-                            }
-                        }
-                    } catch (e: Exception) {
-                        Toast.makeText(context, "Login error: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
-                    } finally {
-                        setLoggingIn(false)
-                    }
-                }
-            }) {
-                Text("Sign in with Google")
-            }
-            Spacer(modifier = Modifier.height(16.dp))
-        }
 
         Button(onClick = onNavigateToStatus) {
             Text("Server Login")
@@ -188,12 +156,50 @@ fun DummyScreen(title: String, onBack: () -> Unit, modifier: Modifier = Modifier
 }
 
 @Composable
-fun StatusScreen(apiBaseUrl: String, onBack: () -> Unit, modifier: Modifier = Modifier) {
+fun StatusScreen(
+    userEmail: String?,
+    apiBaseUrl: String,
+    onBack: () -> Unit,
+    onLogin: (String) -> Unit,
+    setLoggingIn: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
+
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    var mainText by remember(userEmail) { mutableStateOf(if (userEmail != null) "Signed in as $userEmail" else "Logging in...") }
+
     Column(
         modifier = modifier.fillMaxSize(),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+
+        LaunchedEffect(apiBaseUrl) {
+            if (userEmail == null) {
+                setLoggingIn(true)
+                try {
+                    val idToken = signInWithGoogle(context, BuildConfig.GOOGLE_CLIENT_ID)
+                    if (idToken != null) {
+                        val email = loginWithBackend(apiBaseUrl, idToken)
+                        if (email != null) {
+                            onLogin(email)
+                            mainText = "Signed in as $email"
+                        } else {
+                            Toast.makeText(context, "Backend login failed", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                } catch (e: Exception) {
+                    Toast.makeText(context, "Login error: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                } finally {
+                    setLoggingIn(false)
+                }
+
+            }
+        }
+        Text(text = mainText)
+        Spacer(modifier = Modifier.height(16.dp))
         Greeting(apiBaseUrl = apiBaseUrl)
         Spacer(modifier = Modifier.height(16.dp))
         Button(onClick = onBack) {
