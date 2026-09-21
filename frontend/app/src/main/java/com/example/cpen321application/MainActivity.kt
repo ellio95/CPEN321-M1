@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -48,7 +47,7 @@ import kotlinx.coroutines.async
 import java.net.HttpURLConnection
 import java.net.URL
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.time.ZoneId
@@ -70,6 +69,10 @@ data class User(
     val lastName: String?,
 )
 
+enum class Screens {
+    HOME, STATUS, CANVAS, TIMER
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -84,53 +87,42 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun MainApp(apiBaseUrl: String) {
-    var currentScreen by remember { mutableStateOf("Home") }
+    var currentScreen by remember { mutableStateOf(Screens.HOME) }
     var user by remember { mutableStateOf<User?>(null) }
     var server by remember { mutableStateOf<ServerInfo?>(null) }
-    var isLoggingIn by remember { mutableStateOf(false) }
 
     Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
         Box(modifier = Modifier.fillMaxSize()) {
             when (currentScreen) {
-                "Home" -> HomeScreen(
+                Screens.HOME -> HomeScreen(
 
-                    onNavigateToStatus = { currentScreen = "Status" },
-                    onNavigateToProfile = { currentScreen = "LiveCanvas" },
-                    onNavigateToSettings = { currentScreen = "Settings" },
+                    onNavigateToStatus = { currentScreen = Screens.STATUS },
+                    onNavigateToCanvas = { currentScreen = Screens.CANVAS },
+                    onNavigateToTimer = { currentScreen = Screens.TIMER },
                     modifier = Modifier.padding(innerPadding)
                 )
 
-                "Status" -> StatusScreen(
+                Screens.STATUS -> StatusScreen(
                     user = user,
                     server = server,
                     apiBaseUrl = apiBaseUrl,
-                    onBack = { currentScreen = "Home" },
+                    onBack = { currentScreen = Screens.HOME },
                     modifier = Modifier.padding(innerPadding),
                     onLogin = { user = it },
                     onFetch = { server = it },
-                    setLoggingIn = { isLoggingIn = it },
                 )
 
-                "LiveCanvas" -> LiveCanvasScreen(
-                    onBack = { currentScreen = "Home" },
+                Screens.CANVAS -> LiveCanvasScreen(
+                    onBack = { currentScreen = Screens.HOME },
                     apiBaseUrl = apiBaseUrl,
                     modifier = Modifier.padding(innerPadding)
                 )
 
-                "Settings" -> DummyScreen(
+                Screens.TIMER -> DummyScreen(
                     title = "Settings Screen",
-                    onBack = { currentScreen = "Home" },
+                    onBack = { currentScreen = Screens.HOME },
                     modifier = Modifier.padding(innerPadding)
                 )
-            }
-
-            if (isLoggingIn) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator()
-                }
             }
         }
     }
@@ -139,8 +131,8 @@ fun MainApp(apiBaseUrl: String) {
 @Composable
 fun HomeScreen(
     onNavigateToStatus: () -> Unit,
-    onNavigateToProfile: () -> Unit,
-    onNavigateToSettings: () -> Unit,
+    onNavigateToCanvas: () -> Unit,
+    onNavigateToTimer: () -> Unit,
     modifier: Modifier = Modifier
 ) {
 
@@ -158,13 +150,13 @@ fun HomeScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Button(onClick = onNavigateToProfile) {
+        Button(onClick = onNavigateToCanvas) {
             Text("Live Pixel Art")
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Button(onClick = onNavigateToSettings) {
+        Button(onClick = onNavigateToTimer) {
             Text("Timer")
         }
     }
@@ -178,7 +170,6 @@ fun StatusScreen(
     onBack: () -> Unit,
     onLogin: (User) -> Unit,
     onFetch: (ServerInfo?) -> Unit,
-    setLoggingIn: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
 
@@ -199,7 +190,6 @@ fun StatusScreen(
         LaunchedEffect(apiBaseUrl) {
             onFetch(fetchServerInfo(apiBaseUrl))
             if (user == null) {
-                setLoggingIn(true)
                 try {
                     val idToken = signInWithGoogle(context, BuildConfig.GOOGLE_CLIENT_ID)
                     if (idToken != null) {
@@ -218,10 +208,7 @@ fun StatusScreen(
                 } catch (e: Exception) {
                     Toast.makeText(context, "Login error: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
                     mainText = errorMsg
-                } finally {
-                    setLoggingIn(false)
                 }
-
             }
         }
         Text(text = mainText)
@@ -255,23 +242,46 @@ fun LiveCanvasScreen(
         }
     }
 
-    // A test loop simulation that drops randomized colors on random indices every 300 milliseconds 
-    // to verify that layout updates and color parsing function perfectly until WebSockets are linked.
-    LaunchedEffect(Unit) {
-        val hexColors = listOf("#FF0000", "#00FF00", "#0000FF", "#FFFF00", "#FF00FF", "#00FFFF", "#000000", "#FFFFFF")
-        while (true) {
-            delay(300L)
-            val randomX = (0 until 16).random()
-            val randomY = (0 until 16).random()
-            val randomHex = hexColors.random()
-            
-            // This safely mimics how your websocket handler will read json and update state:
-            try {
-                val colorObj = androidx.compose.ui.graphics.Color(android.graphics.Color.parseColor(randomHex))
-                canvasState[randomY][randomX] = colorObj
-            } catch (e: Exception) {
-                // Fail-safe color parse skip
-            }
+    // Establish connection to the pixel streaming websocket server endpoint
+    LaunchedEffect(apiBaseUrl) {
+        val wsUrl = apiBaseUrl
+            .replace("http://", "ws://")
+            .replace("https://", "wss://")
+            .trimEnd('/') + "/pixels"
+
+        val client = okhttp3.OkHttpClient()
+        val request = okhttp3.Request.Builder().url(wsUrl).build()
+        
+        var webSocket: okhttp3.WebSocket? = null
+
+        try {
+            webSocket = client.newWebSocket(request, object : okhttp3.WebSocketListener() {
+                override fun onMessage(webSocket: okhttp3.WebSocket, text: String) {
+                    try {
+                        val json = JSONObject(text)
+                        val x = json.getInt("x")
+                        val y = json.getInt("y")
+                        val hexColor = json.getString("color")
+                        
+                        if (x in 0 until 16 && y in 0 until 16) {
+                            val colorObj = Color(android.graphics.Color.parseColor(hexColor))
+                            canvasState[y][x] = colorObj
+                        }
+                    } catch (e: Exception) {
+                        Log.e("CanvasWS", "Failed to parse streaming pixel message packet", e)
+                    }
+                }
+
+                override fun onFailure(webSocket: okhttp3.WebSocket, t: Throwable, response: okhttp3.Response?) {
+                    Log.e("CanvasWS", "WebSocket stream connection failed: ${t.message}", t)
+                }
+            })
+
+            // Keep the coroutine alive to protect the socket lifecycle context scope
+            awaitCancellation()
+        } finally {
+            // Safely close the websocket stream connection when leaving the screen canvas composition context
+            webSocket?.close(1000, "Screen exited or disposed")
         }
     }
 
@@ -307,7 +317,7 @@ fun LiveCanvasScreen(
                                 modifier = Modifier
                                     .weight(1f)
                                     .fillMaxHeight()
-                                    .padding(0.5.dp) // Creates pixel border outlines grid grid spacing separation
+                                    .padding(0.0.dp) // Creates pixel border outlines grid spacing separation
                                     .background(canvasState[y][x])
                             )
                         }
