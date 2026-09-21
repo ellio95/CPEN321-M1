@@ -1,4 +1,5 @@
 import { createApp } from './app';
+import { attachPixelRelay } from "./relay";
 import { env } from './config/env';
 
 const app = createApp();
@@ -14,3 +15,5 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     });
   });
 }
+
+attachPixelRelay(server);

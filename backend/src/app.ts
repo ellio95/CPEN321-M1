@@ -11,15 +11,15 @@ export function createApp(): Express {
     res.json({status: "ok"})
   });
 
-  app.get('/info', (_req, res) => {
-    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  // app.get('/info', (_req, res) => {
+  //   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-    res.json({ 
-      timezone: timezone,
-      author: "Elliot Shepherd",
-      status: "ok"
-    });
-  });
+  //   res.json({ 
+  //     timezone: timezone,
+  //     author: "Elliot Shepherd",
+  //     status: "ok"
+  //   });
+  // });
 
   app.get('/ip', async (_req, res) => {
     try {
