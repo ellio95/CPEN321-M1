@@ -7,6 +7,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,7 +15,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -41,13 +45,21 @@ import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.async
 import java.net.HttpURLConnection
 import java.net.URL
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.time.ZoneId
@@ -87,9 +99,29 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun MainApp(apiBaseUrl: String) {
+
+    val context = LocalContext.current
     var currentScreen by remember { mutableStateOf(Screens.HOME) }
     var user by remember { mutableStateOf<User?>(null) }
     var server by remember { mutableStateOf<ServerInfo?>(null) }
+
+    // Global Timer State hoisted to MainApp level so it persists between screens
+    var totalSecondsRemaining by remember { mutableIntStateOf(0) }
+    var isTimerRunning by remember { mutableStateOf(false) }
+    var hasTimerExpired by remember { mutableStateOf(false) }
+
+    // Global countdown loop execution
+    LaunchedEffect(isTimerRunning, totalSecondsRemaining) {
+        if (isTimerRunning) {
+            delay(1000L.milliseconds)
+            totalSecondsRemaining -= 1
+            if (totalSecondsRemaining == 0) {
+                hasTimerExpired = true // Flag expiration state globally
+                Toast.makeText(context, "Your timer has completed!", Toast.LENGTH_LONG).show()
+                Log.d("TimerScreen", "Global Timer completed successfully.")
+            }
+        }
+    }
 
     Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
         Box(modifier = Modifier.fillMaxSize()) {
@@ -118,8 +150,21 @@ fun MainApp(apiBaseUrl: String) {
                     modifier = Modifier.padding(innerPadding)
                 )
 
-                Screens.TIMER -> DummyScreen(
-                    title = "Settings Screen",
+                Screens.TIMER -> TimerScreen(
+                    totalSecondsRemaining = totalSecondsRemaining,
+                    isTimerRunning = isTimerRunning,
+                    hasTimerExpired = hasTimerExpired,
+                    onStartTimer = { secs ->
+                        totalSecondsRemaining = secs
+                        isTimerRunning = true
+                        hasTimerExpired = false // Clear completion state on new start
+                    },
+                    onToggleTimer = { isTimerRunning = !isTimerRunning },
+                    onResetTimer = {
+                        isTimerRunning = false
+                        totalSecondsRemaining = 0
+                        hasTimerExpired = false // Clear state on clean reset
+                    },
                     onBack = { currentScreen = Screens.HOME },
                     modifier = Modifier.padding(innerPadding)
                 )
@@ -234,7 +279,7 @@ fun LiveCanvasScreen(
             for (i in 0 until 16) {
                 val row = mutableStateListOf<Color>().apply {
                     for (j in 0 until 16) {
-                        add(androidx.compose.ui.graphics.Color(0xFFE0E0E0))
+                        add(Color(0xFFE0E0E0))
                     }
                 }
                 add(row)
@@ -335,6 +380,171 @@ fun LiveCanvasScreen(
 }
 
 @Composable
+fun TimerScreen(
+    totalSecondsRemaining: Int,
+    isTimerRunning: Boolean,
+    hasTimerExpired: Boolean,
+    onStartTimer: (Int) -> Unit,
+    onToggleTimer: () -> Unit,
+    onResetTimer: () -> Unit,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    // 1. Local state variables used exclusively for the input form setup tracking
+    var inputMinutes by remember { mutableStateOf("") }
+    var inputSeconds by remember { mutableStateOf("") }
+
+    Column(
+        modifier = modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        if (hasTimerExpired) {
+            // Expired View Mode
+            val displayMins = (totalSecondsRemaining * -1) / 60
+            val displaySecs = (totalSecondsRemaining * -1) % 60
+
+            Text(
+                text = "Timer Complete!",
+                style = MaterialTheme.typography.headlineMedium
+            )
+            
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Renders a basic surprise graphical canvas placeholder using simple shapes
+            Box(
+                modifier = Modifier
+                    .size(120.dp)
+                    .background(Color(0xFF4CAF50), shape = CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("✔", color = Color.White, style = MaterialTheme.typography.headlineLarge)
+            }
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            Text(
+                text = "Your timer expired $displayMins minute${if (displayMins % 60 == 1) "" else "s"} and $displaySecs second${if (displaySecs == 1) "" else "s"} ago",
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Button(onClick = onResetTimer) {
+                Text("New Timer")
+            }
+        } else {
+            // Standard layout stays here
+            Text(
+                text = "Countdown Timer",
+                style = MaterialTheme.typography.headlineMedium
+            )
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+        if (!isTimerRunning && totalSecondsRemaining == 0) {
+            // Setup Mode UI: Input forms
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = inputMinutes,
+                    onValueChange = { newValue ->
+                        val digits = newValue.filter { it.isDigit() }
+                        val num = digits.toIntOrNull() ?: 0
+                        if (digits.isEmpty() || num <= 59) {
+                            inputMinutes = digits
+                        }
+                    },
+                    label = { Text("Min") },
+                    modifier = Modifier.width(80.dp),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Number
+                    ),
+                    singleLine = true
+                )
+
+                Text(":", style = MaterialTheme.typography.headlineMedium)
+
+                OutlinedTextField(
+                    value = inputSeconds,
+                    onValueChange = { newValue ->
+                        val digits = newValue.filter { it.isDigit() }
+                        val num = digits.toIntOrNull() ?: 0
+                        if (digits.isEmpty() || num <= 59) {
+                            inputSeconds = digits
+                        }
+                    },
+                    label = { Text("Sec") },
+                    modifier = Modifier.width(80.dp),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Number
+                    ),
+                    singleLine = true
+                )
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Button(
+                onClick = {
+                    val mins = inputMinutes.toIntOrNull() ?: 0
+                    val secs = inputSeconds.toIntOrNull() ?: 0
+                    val grandTotal = (mins * 60) + secs
+                    if (grandTotal > 0) {
+                        onStartTimer(grandTotal)
+                    }
+                }
+            ) {
+                Text("Start Timer")
+            }
+        } else {
+            // Running Mode UI: Show running countdown values and Stop buttons
+            val displayMins = totalSecondsRemaining / 60
+            val displaySecs = totalSecondsRemaining % 60
+            val timeString = String.format(Locale.US, "%02d:%02d", displayMins, displaySecs)
+
+            Text(
+                text = timeString,
+                style = MaterialTheme.typography.displayLarge
+            )
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Button(
+                    onClick = onToggleTimer,
+                    enabled = totalSecondsRemaining > 0
+                ) {
+                    Text(if (isTimerRunning) "Pause" else "Resume")
+                }
+
+                Button(
+                    onClick = {
+                        onResetTimer()
+                        inputMinutes = ""
+                        inputSeconds = ""
+                    }
+                ) {
+                    Text("Reset")
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(48.dp))
+
+        Button(onClick = onBack) {
+            Text("Back to Home")
+        }
+        }
+    }
+}
+
+
+@Composable
 fun DummyScreen(title: String, onBack: () -> Unit, modifier: Modifier = Modifier) {
     Column(
         modifier = modifier.fillMaxSize(),
@@ -356,7 +566,7 @@ fun StatusInfo(server: ServerInfo?, user: User?, modifier: Modifier = Modifier) 
     LaunchedEffect(user, server) {
         if (user != null && server != null) {
             while (true) {
-                kotlinx.coroutines.delay(1000L.milliseconds)
+                delay(1000L.milliseconds)
                 tickCount++
             }
         }
@@ -392,6 +602,7 @@ fun StatusInfo(server: ServerInfo?, user: User?, modifier: Modifier = Modifier) 
             val formattedServerTime = String.format(Locale.US, "%02d:%02d:%02d", runningHours, runningMinutes, runningSeconds)
             "$formattedServerTime ${parts[1]}" // Re-append the "GMT+hh:mm" zone component
         } catch (e: Exception) {
+            Log.e("StatusInfo", "Failed to parse server local time", e)
             server.localTime
         }
 
@@ -481,6 +692,7 @@ private suspend fun loginWithBackend(apiBaseUrl: String, idToken: String): User?
                         lastName = json.optString("userLastName", ""),
                     )
                 } catch (e: Exception) {
+                    Log.e("Auth", "Failed to parse backend login response", e)
                     null
                 }
             }
@@ -519,27 +731,32 @@ private suspend fun fetchServerInfo(apiBaseUrl: String): ServerInfo? = withConte
         }
     }
 
-    // Fire endpoints concurrently using async coroutine primitives within CoroutineScope
-    val scope = CoroutineScope(Dispatchers.IO)
-    val ipDeferred = scope.async { performGetRequest("$baseUrl/ip") }
-    val timeDeferred = scope.async { performGetRequest("$baseUrl/time") }
-    val authorDeferred = scope.async { performGetRequest("$baseUrl/author") }
-
+    // Fire endpoints concurrently using async coroutine primitives within the existing coroutine context supervisor scope
     try {
-        val ipBody = ipDeferred.await() ?: return@withContext null
-        val timeBody = timeDeferred.await() ?: return@withContext null
-        val authorBody = authorDeferred.await() ?: return@withContext null
+        supervisorScope {
+            val ipDeferred = async { performGetRequest("$baseUrl/ip") }
+            val timeDeferred = async { performGetRequest("$baseUrl/time") }
+            val authorDeferred = async { performGetRequest("$baseUrl/author") }
 
-        val ipJson = JSONObject(ipBody)
-        val timeJson = JSONObject(timeBody)
-        val authorJson = JSONObject(authorBody)
+            val ipBody = ipDeferred.await()
+            val timeBody = timeDeferred.await()
+            val authorBody = authorDeferred.await()
 
-        ServerInfo(
-            ip = ipJson.optString("ip", ""),
-            localTime = timeJson.optString("time", ""),
-            author = authorJson.optString("author", ""),
-            status = "ok"
-        )
+            if (ipBody != null && timeBody != null && authorBody != null) {
+                val ipJson = JSONObject(ipBody)
+                val timeJson = JSONObject(timeBody)
+                val authorJson = JSONObject(authorBody)
+
+                ServerInfo(
+                    ip = ipJson.optString("ip", ""),
+                    localTime = timeJson.optString("time", ""),
+                    author = authorJson.optString("author", ""),
+                    status = "ok"
+                )
+            } else {
+                null
+            }
+        }
     } catch (e: Exception) {
         Log.e("Fetch", "Error parsing server info: ${e.message ?: e.javaClass.simpleName}")
         null
